@@ -1,0 +1,247 @@
+---
+title: "Data Reporting Story Pitch"
+author: "Jessica Baugh"
+date: "2025-10-16"
+output:
+  html_document: default
+---
+
+# **Hundreds of unaccompanied migrant children go to a rural Washington County, and its classrooms.**
+
+A rural Washington county has one of the state’s highest numbers of unaccompanied migrant children, trailing only Seattle-area counties. Seventy percent of these children are not going to their parents. 
+
+Mason County received 412 unaccompanied children from January 2015 through May 2023, according to data from the U.S. Department of Health and Human Services. This is more than triple the county average in Washington state. Of these children, 60% were placed with non-parent sponsors. 
+
+Since 2015, there has been a similar number of migrant children arriving. As they arrive and adapt to living in Mason County, school can be a place of support and structure. Do the local schools in Mason County have programs to help this population of students settle? 
+
+This reporting will build on The New York Times' investigation “Where Migrant Children Are Living, and Often Working, in the U.S.,” which marked Mason County as the hotspot of Washington for non-parent sponsor placements. Exploring how or if school districts address this population of children can show how local policies and organizations have adapted to account for the number of migrant children coming to Mason County. 
+
+
+# Setup
+
+```{r setup, eval=TRUE, message=FALSE, warning=FALSE}
+# Loading necessary packages 
+pacman::p_load(tidyverse, lubridate, janitor, tidycensus, zipcodeR, stringr)
+
+# Loading in the NYTimes dataset from GitHub
+nyt_mc <- read_csv("data.csv", col_types = cols(ID = col_character(), 
+    `Child's Date of Entry` = col_date(format = "%m/%d/%y"), 
+    `Child's Date of Release` = col_date(format = "%m/%d/%y"), 
+    `Sponsor Category` = col_character()))
+nyt_mc <- clean_names(nyt_mc)
+
+# Selecting the Mason County zipcodes
+mason_zips <- c("98524","98528","98546","98548","98555","98560","98584","98588","98592")
+
+mason_mc <- nyt_mc %>%
+  mutate(
+    sponsor_zip_5 = str_extract(as.character(sponsor_zipcode), "^\\d{5}")
+  ) %>%
+  filter(sponsor_zip_5 %in% mason_zips)
+```
+
+------------------------------------------------------------------------
+
+## When migrant children come to Mason County, 60% of them do not go to parent sponsors. Most go to immediate relatives, such as a sibling, aunt, uncle or cousin.
+
+### Visualization 1: Bar chart of sponsor types 
+
+```{r chartA, eval=TRUE, message=FALSE, warning=FALSE}
+
+# summarize and calculate percentage
+top_sponsors_summary <- mason_mc %>%
+  filter(!is.na(sponsor_category)) %>%
+  group_by(sponsor_category) %>%
+  summarize(kids = n()) %>%
+  mutate(percent = kids / sum(kids))
+
+# ploting and creating the visual in ggplot
+pA <- top_sponsors_summary %>%
+  ggplot(aes(x = sponsor_category, y = percent)) +
+  geom_col(fill = "#2b6cb0") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_x_discrete(
+    labels = c(
+      "Parent",   
+      "Immediate Relative", 
+      "Other"     
+    )
+  ) +
+  labs(
+    title = "Most kids coming to Mason County aren’t released to parents",
+    caption = "Source: U.S. HHS (via NYT release), analysis by Jessica Baugh
+       *One child had no sponsor category",
+    x = "Types of Sponsors",
+    y = "Percent of Kids"
+  ) +
+  theme(axis.ticks.x = element_blank())
+
+pA
+```
+
+------------------------------------------------------------------------
+
+## Since 2015, the number of children going to non-parents generally rises and falls along with the overall number of children entering the county. However, in some quarters, all of the children go to non-parent sponsors, including most recently in 2022.
+
+### Visualization 2: Line chart of change over time
+
+```{r chartB_line, eval=TRUE, message=FALSE, warning=FALSE}
+
+# organizing the data to create the line chart
+nonparent_q <- mason_mc %>%
+  filter(!is.na(childs_date_of_release), sponsor_category %in% 1:3) %>%
+  mutate(qtr = floor_date(as.Date(childs_date_of_release), "quarter"),
+         is_non_parent = sponsor_category != 1) %>%
+  group_by(qtr) %>%
+  summarise(non_parent_count = sum(is_non_parent), total = n(), .groups = "drop")
+
+# plotting and creating the visual in ggplot
+pB <- ggplot(nonparent_q, aes(qtr, non_parent_count)) +
+  geom_line(linewidth = 1.2, color = "#2b6cb0") +
+  geom_point(size = 1.8, color = "#2b6cb0") +
+  geom_line(aes(y = total), color = "grey70", linetype = "dashed") +
+  geom_point(
+    data = subset(nonparent_q, non_parent_count == total),
+    aes(y = non_parent_count),
+    color = "#02075d",
+    size = 3
+  ) +
+  labs(
+    title = "Kids placed with non-parent sponors over time",
+        subtitle= "Shown in comparison to overall placements (grey)",
+    x = "Years divided quarterly",
+    y = "Number of kids",
+    caption = "Source: U.S. HHS (via NYT release), analysis by Jessica Baugh
+    *One child had no sponsor category"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+pB
+```
+
+------------------------------------------------------------------------
+
+## Mason County has the highest share of kids going to non-parent sponsors in Washington. Adams County is second, and all other counties have much lower rates.
+
+### Visualization 3: Chloropleth map of WA counties 
+
+### Load WA population data
+
+```{r}
+
+# using census data to get county population data
+wa_county_map <- get_acs(
+  geography = "county", 
+  state = "wa", 
+  variables = "B01003_001", 
+  geometry = T
+)
+```
+
+### Getting + joining zipcode data
+
+```{r}
+
+# Getting zipcode data for WA
+zip_to_county_WA <- zipcodeR::zip_code_db %>%
+  filter(state == "WA") %>%
+  transmute(
+    sponsor_zipcode = zipcode,
+    county   = county,    
+  )
+
+# Joining data and narrowing it down
+wa_nonparent <- nyt_mc %>%
+  left_join(zip_to_county_WA, by = "sponsor_zipcode") %>%
+  filter(
+    !is.na(county),              
+    sponsor_category %in% c("2","3")
+  )
+
+```
+
+### Assigning zipcodes to counties
+
+```{r}
+# Build WA county FIPS from names
+norm_county <- function(x) {
+  x |>
+    stringr::str_to_lower() |>
+    stringr::str_replace_all("\\bcounty\\b", "") |>
+    stringr::str_replace_all("[^a-z ]", " ") |>
+    stringr::str_squish()
+}
+
+wa_fips <- tidycensus::fips_codes %>%
+  filter(state == "WA") %>%
+  transmute(
+    county_name_clean = norm_county(county),               # "mason"
+    county_fips       = paste0(state_code, county_code)    # e.g., "53045"
+  ) %>%
+  distinct()
+
+wa_counts <- wa_nonparent %>%
+  mutate(county_name_clean = norm_county(county)) %>%
+  inner_join(wa_fips, by = "county_name_clean") %>%
+  count(county_fips, name = "children_nonparent")
+
+```
+
+### Joining counts with shapes/population + finding rate
+
+```{r}
+wa_rates <- wa_county_map %>%
+  mutate(GEOID = as.character(GEOID)) %>%
+  transmute(
+    county_fips = stringr::str_pad(GEOID, width = 5, pad = "0"),
+    county_name = NAME,
+    population  = estimate,
+    geometry
+  ) %>%
+  left_join(wa_counts, by = "county_fips") %>%
+  mutate(
+    children_nonparent = tidyr::replace_na(children_nonparent, 0L),
+    rate_per_100k      = 100000 * children_nonparent / population
+  )
+```
+
+### Creating visualization
+
+```{r}
+
+brks <- round(pretty(range(wa_rates$rate_per_100k, na.rm = TRUE), n = 5))
+
+p_rate <- ggplot(wa_rates, aes(fill = rate_per_100k)) +
+  geom_sf(color = "black", linewidth = 0.25) +
+ scale_fill_gradientn(
+  colors = RColorBrewer::brewer.pal(9, "Blues"),
+  breaks = brks,  # ← integer ticks
+  labels = function(x) formatC(x, format = "f", digits = 0, big.mark = ","),  # ← no decimals
+  na.value = "grey90",
+  name = "Kids per 100,000 residents"
+) +
+  labs(
+    title    = "Mason County has the highest rate of kids going to non-parents",
+    caption  = "U.S. HHS via NYT release; population via Census; analysis by Jessica Baugh
+    *One child had no sponsor category",
+    x = NULL, y = NULL
+  ) +
+  theme_void(base_size = 12) +
+  theme(legend.position = "right")
+
+p_rate
+```
+
+# Limitations 
+
+The HHS data that I have tracks the initial county where each child is released, but it does not show whether the child remains there for long. Therefore, if these children are not enrolling in school in this county, this could impact the number of programs that are being created or managed to address this population.
+
+# Methods 
+
+This analysis uses federal data from the U.S. Department of Health and Human Services, which was made public by The New York Times. The dataset spans from January 2015 to May 2023. Each row represents an unaccompanied child released to a sponsor, with fields for the sponsor's zip code and category. I filtered the data for zip codes in Mason County and then used it to produce counts for sponsor type and totals over time.
+To align sponsors' zipcodes with counties, I used the zipcodeR package to map each zipcode to its county FIPS, then joined the migrant child data to the appropriate counties throughout Washington. I merged these results with the 2023 American Community Survey county population estimates to create the choropleth map, which shows rates of children going to non-parent sponsors by 100,000.
+I produced the visuals in my R Markdown file, titled 570-final-pitch-baugh.Rmd. These include:
+- Sponsor category bar chart: Determined using Mason County releases by sponsor category data. 
+- Change over time line chart: Quarterly totals for Mason County, with the share going to non-parent sponsor highlighted. 
+- Choropleth map: Joined county totals to the Washington shape file to visualize the share of non-parent placements across the state by county. 
