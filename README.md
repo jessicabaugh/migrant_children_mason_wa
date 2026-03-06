@@ -20,7 +20,7 @@ This analysis uses federal data from the U.S. Department of Health and Human Ser
 
 To align sponsors' zipcodes with counties, I used the zipcodeR package to map each zipcode to its county FIPS, then joined the migrant child data to the appropriate counties throughout Washington. I merged these results with the 2023 American Community Survey county population estimates to create the choropleth map, which shows rates of children going to non-parent sponsors by 100,000.
 
-I produced the visuals in my R Markdown file, titled mason-migrant-children-pitch.Rmd. These include:
+I produced the visuals in my R Markdown file, titled migrant-children-mason_wa.Rmd. These include:
 - Sponsor category bar chart: Determined using Mason County releases by sponsor category data. 
 - Change over time line chart: Quarterly totals for Mason County, with the share going to non-parent sponsor highlighted. 
 - Choropleth map: Joined county totals to the Washington shape file to visualize the share of non-parent placements across the state by county. 
